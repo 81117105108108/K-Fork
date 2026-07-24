@@ -109,10 +109,11 @@ OP_TABLE_V5 = [
     BytecodeOp("FASTCALL2", "iABC", 0x9E, True),
     BytecodeOp("FASTCALL2K", "iABC", 0x81, True),
     BytecodeOp("FORGPREP", "iAB", 0x64),
-    BytecodeOp("JUMPXEQKNIL", "iAsBx", 0x47, True),
-    BytecodeOp("JUMPXEQKB", "iAsBx", 0x2A, True),
-    BytecodeOp("JUMPXEQKN", "iAsBx", 0x0D, True),
-    BytecodeOp("JUMPXEQKS", "iAsBx", 0xF0, True),
+    # FIX: These use the 24-bit sAx field for jumping, not sBx
+    BytecodeOp("JUMPXEQKNIL", "iAsAx", 0x47, True),
+    BytecodeOp("JUMPXEQKB", "iAsAx", 0x2A, True),
+    BytecodeOp("JUMPXEQKN", "iAsAx", 0x0D, True),
+    BytecodeOp("JUMPXEQKS", "iAsAx", 0xF0, True),
     BytecodeOp("IDIV", "iABC", 0xD3),
     BytecodeOp("IDIVK", "iABC", 0xB6),
     BytecodeOp("COUNT", "none", 0x99),
@@ -121,7 +122,6 @@ OP_TABLE_V5 = [
 # notes:
 # 1. v6 added FASTCALL3.
 # 2. v6 removed DEP_FORGLOOP_INEXT
-# also, this probably should be a different table.
 OP_TABLE_V6 = OP_TABLE_V5 + [
     BytecodeOp("FASTCALL3", "iABC", 0x34, True),
 ]
@@ -150,22 +150,18 @@ def get_arg_c(i: int) -> int:
     return (i >> 24) & 0xFF
 
 
-# def GETARG_D(i: int) -> int:
-#     d = (i >> 16) & 0xFFFF  # Extract 16 bits for D
-#     return d - 0x10000 if d & 0x8000 else d  # Convert to signed
-
-
 def get_arg_Bx(i: int) -> int:
     return i >> 16
 
 
 def get_arg_sBx(i: int) -> int:
     # luau D field is a 16-bit signed value in bits 16-31 (two's complement).
-    # the old code used - 131071 which is a lua 5.x bias for an 18-bit field;
-    # luau's encoding uses a standard 16 bit signed int
     d = (i >> 16) & 0xFFFF
     return d - 0x10000 if d >= 0x8000 else d
 
 
 def get_arg_sAx(i: int) -> int:
-    return i >> 8
+    # FIX: sAx is a 24-bit signed value in bits 8-31 (two's complement).
+    # Without this, backward JUMPX jumps break completely!
+    d = i >> 8
+    return d - 0x1000000 if d & 0x800000 else d
