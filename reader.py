@@ -1,5 +1,5 @@
 from struct import unpack
-from typing import Optional, List, Tuple
+from typing import Optional
 
 
 class Reader:
@@ -26,13 +26,16 @@ class Reader:
         return self.unpackStruct(4, "Attempted to read 4 bytes at position ", "<I")
 
     def nextInt(self) -> int:
+        # Note: nextInt and nextUint32 behave identically in Luau bytecode,
+        # as instructions are 32-bit unsigned integers.
         b = [self.nextByte() for _ in range(4)]
         return (b[3] << 24) | (b[2] << 16) | (b[1] << 8) | b[0]
 
     def nextVarInt(self) -> int:
         result = 0
         shift = 0
-        while True:
+        # FIX: Luau VarInts are strictly limited to 5 bytes (35 bits)
+        for _ in range(5):
             if not self.canRead(1):
                 raise IndexError(
                     f"Unexpected end of bytecode while reading VarInt at position {self.pos}"
@@ -42,6 +45,9 @@ class Reader:
             if not (b & 0x80):
                 break
             shift += 7
+        else:
+            raise ValueError(f"VarInt at position {self.pos} is too long (max 5 bytes)")
+            
         return result
 
     def nextString(self) -> str:
@@ -90,27 +96,3 @@ class Reader:
         data = self.bytecode[self.pos : self.pos + n]
         self.pos += n
         return data
-
-    def validateJumpTarget(self, target: int, max_instructions: int) -> None:
-        """
-        Validate a jump target to ensure it's within valid bounds.
-        """
-        if target < 0 or target >= max_instructions:
-            raise ValueError(
-                f"Invalid jump target {target}. Must be between 0 and {max_instructions - 1}."
-            )
-
-    def parseJumpTargets(self, instructions: List[Tuple[str, int]]) -> List[Tuple[str, int, Optional[str]]]:
-        """
-        Parses jump targets and associates labels with them.
-        """
-        max_instructions = len(instructions)
-        labeled_instructions = []
-        for idx, (opcode, operand) in enumerate(instructions):
-            if opcode.startswith("JUMP"):
-                label = f"::{operand}::" if 0 <= operand < max_instructions else None
-                self.validateJumpTarget(operand, max_instructions)
-                labeled_instructions.append((opcode, operand, label))
-            else:
-                labeled_instructions.append((opcode, operand, None))
-        return labeled_instructions
