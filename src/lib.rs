@@ -211,11 +211,11 @@ pub fn get_arg_c(i: u32) -> u8 { ((i >> 24) & 0xFF) as u8 }
 pub fn get_arg_bx(i: u32) -> u32 { i >> 16 }
 pub fn get_arg_sbx(i: u32) -> i32 {
     let d = (i >> 16) & 0xFFFF;
-    if d >= 0x8000 { (d - 0x10000) as i32 } else { d as i32 }
+    if d >= 0x8000 { (d as i32) - 0x10000 } else { d as i32 }
 }
 pub fn get_arg_sax(i: u32) -> i32 {
     let d = i >> 8;
-    if d & 0x800000 != 0 { (d - 0x1000000) as i32 } else { d as i32 }
+    if d & 0x800000 != 0 { (d as i32) - 0x1000000 } else { d as i32 }
 }
 
 // READER
@@ -1124,3 +1124,194 @@ pub fn disassemble(bytecode: &[u8]) -> (Vec<String>, Vec<String>, usize, i32, i3
 
     (output, decompiled_output, protos, luau_version as i32, types_version as i32)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::panic::catch_unwind;
+
+    // =========================================================================
+    // 1. BITWISE OPERATION TESTS
+    // =========================================================================
+    #[test]
+    fn test_bitwise_ops() {
+        // A standard instruction: Encoded OP=0x07 (decodes via *227 to 0x35 GETGLOBAL), A=5, B=0, C=0
+        let instr: u32 = 0x00000507;
+        assert_eq!(get_opcode(instr), 0x35);
+        assert_eq!(get_arg_a(instr), 5);
+        assert_eq!(get_arg_b(instr), 0);
+        assert_eq!(get_arg_c(instr), 0);
+        assert_eq!(get_arg_bx(instr), 0);
+
+        // Test signed Bx (sBx) with a negative offset (backward jump)
+        // Let's say offset is -1. 0xFFFF in 16 bits.
+        // Instr: Encoded OP=0x17 (decodes to 0x65 JUMP), A=0, Bx=0xFFFF
+        let jump_instr: u32 = 0xFFFF0017;
+        assert_eq!(get_opcode(jump_instr), 0x65);
+        assert_eq!(get_arg_sbx(jump_instr), -1);
+
+        // Test signed Ax (sAx) with a negative offset
+        // Offset -1 in 24 bits is 0xFFFFFF
+        // Instr: Encoded OP=0x43 (decodes to 0x69 JUMPX)
+        let jumpx_instr: u32 = 0xFFFFFF43;
+        assert_eq!(get_opcode(jumpx_instr), 0x69);
+        assert_eq!(get_arg_sax(jumpx_instr), -1);
+    }
+
+    // =========================================================================
+    // 2. READER TESTS (VARINTS, STRINGS, PANICS)
+    // =========================================================================
+    #[test]
+    fn test_reader_varint() {
+        // 300 in LEB128: 0xAC 0x02
+        let mut reader = Reader::new(&[0xAC, 0x02]);
+        assert_eq!(reader.next_var_int(), 300);
+        assert_eq!(reader.pos, 2);
+
+        // Single byte
+        let mut reader2 = Reader::new(&[0x05]);
+        assert_eq!(reader2.next_var_int(), 5);
+    }
+
+    #[test]
+    fn test_reader_string() {
+        // Length 5, "Hello"
+        let mut reader = Reader::new(&[0x05, b'H', b'e', b'l', b'l', b'o']);
+        assert_eq!(reader.next_string(), "Hello");
+    }
+
+    #[test]
+    fn test_reader_floats() {
+        // f32 1.0 in little-endian: 00 00 80 3F
+        let mut reader = Reader::new(&[0x00, 0x00, 0x80, 0x3F]);
+        assert_eq!(reader.next_float(), 1.0);
+
+        // f64 1.0 in little-endian: 00 00 00 00 00 00 F0 3F
+        let mut reader2 = Reader::new(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x3F]);
+        assert_eq!(reader2.next_double(), 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Attempted to read byte")]
+    fn test_reader_eof_byte() {
+        let mut reader = Reader::new(&[]);
+        let _ = reader.next_byte();
+    }
+
+    #[test]
+    #[should_panic(expected = "is too long")]
+    fn test_reader_varint_too_long() {
+        // 6 bytes with continuation bit set (0x80)
+        let mut reader = Reader::new(&[0x80, 0x80, 0x80, 0x80, 0x80, 0x80]);
+        let _ = reader.next_var_int();
+    }
+
+    // =========================================================================
+    // 3. IMPORT ID DECOMPOSITION TESTS
+    // =========================================================================
+    #[test]
+    fn test_decompose_import_id() {
+        // count=1, id1=5
+        // Binary: 01 0000000101 0000000000 0000000000 (32 bits)
+        // Hex: 0x40500000
+        let ids = 0x40500000;
+        let parts = decompose_import_id(ids);
+        assert_eq!(parts, vec![5]);
+
+        // count=3, id1=1, id2=2, id3=3
+        // Binary: 11 0000000001 0000000010 0000000011
+        // Hex: 0xC0100803
+        let ids2 = 0xC0100803u32 as i32;
+        let parts2 = decompose_import_id(ids2);
+        assert_eq!(parts2, vec![1, 2, 3]);
+    }
+
+    // =========================================================================
+    // 4. INTEGRATION TEST: MINIMAL VALID BYTECODE
+    // =========================================================================
+    #[test]
+    fn test_disassemble_minimal_v5() {
+        // Construct a minimal Luau V5 bytecode blob
+        let mut blob = Vec::new();
+
+        // Version 5
+        blob.push(0x05);
+        // Types Version 1
+        blob.push(0x01);
+        
+        // String Table (1 string: "hello")
+        blob.extend_from_slice(&[0x01, 0x05, b'h', b'e', b'l', b'l', b'o']);
+        
+        // Proto Table (1 proto)
+        blob.push(0x01);
+        
+        // Proto Data:
+        blob.extend_from_slice(&[0x02, 0x00, 0x00, 0x00, 0x00]); // maxstack, numparams, numupvals, isvararg, flags
+        blob.push(0x00); // typesize (0)
+        blob.push(0x01); // sizecode (1 instruction)
+        blob.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // NOP instruction
+        blob.push(0x00); // sizeconsts (0)
+        blob.push(0x00); // sizeprotos (0)
+        blob.push(0x00); // linedefined (0)
+        blob.push(0x01); // source string id (1 -> "hello")
+        blob.push(0x00); // has line info (false)
+        blob.push(0x00); // has debug info (false)
+        
+        // Main Proto ID
+        blob.push(0x00);
+
+        // Execute disassembly
+        let (disassembled, decompiled, protos, luau_v, types_v) = disassemble(&blob);
+
+        // Assertions
+        assert_eq!(protos, 1);
+        assert_eq!(luau_v, 5);
+        assert_eq!(types_v, 1);
+        
+        // Check disassembled output contains expected strings
+        let dis_str = disassembled.join("\n");
+        assert!(dis_str.contains("function()"));
+        assert!(dis_str.contains("[000] NOP"));
+        assert!(dis_str.contains("end"));
+        
+        // Check decompiled output
+        let decomp_str = decompiled.join("\n");
+        assert!(decomp_str.contains("local function func1()"));
+        assert!(decomp_str.contains("nop"));
+        assert!(decomp_str.contains("end"));
+    }
+
+    // =========================================================================
+    // 5. INTEGRATION TEST: TEXT MODE (BYTECODE[0] == 0)
+    // =========================================================================
+    #[test]
+    fn test_disassemble_text_mode() {
+        let text = b"\x00print('hello world')";
+        let (disassembled, _decompiled, protos, luau_v, types_v) = disassemble(text);
+        
+        assert_eq!(protos, 0);
+        assert_eq!(luau_v, -1);
+        assert_eq!(types_v, -1);
+        assert_eq!(disassembled[0], "print('hello world')");
+    }
+
+    // =========================================================================
+    // 6. PANIC TESTS FOR MALFORMED BYTECODE
+    // =========================================================================
+    #[test]
+    fn test_malformed_bytecode_panics() {
+        // Unsupported version
+        let result = catch_unwind(|| {
+            disassemble(&[0x99]);
+        });
+        assert!(result.is_err(), "Should panic on unsupported version");
+
+        // Truncated proto data (Version 5, Types 1, 0 strings, 1 proto, but truncated proto data)
+        let truncated = vec![0x05, 0x01, 0x00, 0x01, 0x00];
+        let result2 = catch_unwind(|| {
+            disassemble(&truncated);
+        });
+        assert!(result2.is_err(), "Should panic on truncated proto data");
+    }
+}
+
