@@ -8,3 +8,5 @@ compile/compilers
 /compile/bytecode
 .opencode/
 docs/superpowers/plans/
+/target/
+target/

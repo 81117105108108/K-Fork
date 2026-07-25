@@ -1,21 +1,17 @@
 use std::collections::{HashMap, HashSet};
-use std::env;
-use std::fs::File;
-use std::io::{Read, Write};
-use std::time::Instant;
 
 // LUAU CONSTANTS & OPCODES
 
-const LBC_CONSTANT_NIL: u8 = 0;
-const LBC_CONSTANT_BOOLEAN: u8 = 1;
-const LBC_CONSTANT_NUMBER: u8 = 2;
-const LBC_CONSTANT_STRING: u8 = 3;
-const LBC_CONSTANT_IMPORT: u8 = 4;
-const LBC_CONSTANT_TABLE: u8 = 5;
-const LBC_CONSTANT_CLOSURE: u8 = 6;
-const LBC_CONSTANT_VECTOR: u8 = 8;
+pub const LBC_CONSTANT_NIL: u8 = 0;
+pub const LBC_CONSTANT_BOOLEAN: u8 = 1;
+pub const LBC_CONSTANT_NUMBER: u8 = 2;
+pub const LBC_CONSTANT_STRING: u8 = 3;
+pub const LBC_CONSTANT_IMPORT: u8 = 4;
+pub const LBC_CONSTANT_TABLE: u8 = 5;
+pub const LBC_CONSTANT_CLOSURE: u8 = 6;
+pub const LBC_CONSTANT_VECTOR: u8 = 8;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BytecodeOp {
     pub name: &'static str,
     pub op_type: &'static str,
@@ -197,7 +193,7 @@ pub const OP_TABLE_V6: &[BytecodeOp] = &[
     BytecodeOp { name: "COUNT", op_type: "none", number: 0x99, aux: false },
 ];
 
-fn get_op_table(version: u8) -> &'static [BytecodeOp] {
+pub fn get_op_table(version: u8) -> &'static [BytecodeOp] {
     match version {
         5 => OP_TABLE_V5,
         6 => OP_TABLE_V6,
@@ -206,18 +202,18 @@ fn get_op_table(version: u8) -> &'static [BytecodeOp] {
 }
 
 // Bit manipulation functions
-fn get_opcode(i: u32) -> u8 {
+pub fn get_opcode(i: u32) -> u8 {
     ((i.wrapping_mul(227)) & 0xFF) as u8
 }
-fn get_arg_a(i: u32) -> u8 { ((i >> 8) & 0xFF) as u8 }
-fn get_arg_b(i: u32) -> u8 { ((i >> 16) & 0xFF) as u8 }
-fn get_arg_c(i: u32) -> u8 { ((i >> 24) & 0xFF) as u8 }
-fn get_arg_bx(i: u32) -> u32 { i >> 16 }
-fn get_arg_sbx(i: u32) -> i32 {
+pub fn get_arg_a(i: u32) -> u8 { ((i >> 8) & 0xFF) as u8 }
+pub fn get_arg_b(i: u32) -> u8 { ((i >> 16) & 0xFF) as u8 }
+pub fn get_arg_c(i: u32) -> u8 { ((i >> 24) & 0xFF) as u8 }
+pub fn get_arg_bx(i: u32) -> u32 { i >> 16 }
+pub fn get_arg_sbx(i: u32) -> i32 {
     let d = (i >> 16) & 0xFFFF;
     if d >= 0x8000 { (d - 0x10000) as i32 } else { d as i32 }
 }
-fn get_arg_sax(i: u32) -> i32 {
+pub fn get_arg_sax(i: u32) -> i32 {
     let d = i >> 8;
     if d & 0x800000 != 0 { (d - 0x1000000) as i32 } else { d as i32 }
 }
@@ -232,6 +228,10 @@ pub struct Reader<'a> {
 impl<'a> Reader<'a> {
     pub fn new(bytecode: &'a [u8]) -> Self {
         Reader { bytecode, pos: 0 }
+    }
+
+    pub fn pos(&self) -> usize {
+        self.pos
     }
 
     pub fn can_read(&self, n: usize) -> bool {
@@ -300,7 +300,7 @@ impl<'a> Reader<'a> {
 
 // DATA STRUCTURES
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ConstantValue {
     Nil,
     Boolean(bool),
@@ -312,12 +312,12 @@ pub enum ConstantValue {
     Vector([f32; 4]),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Constant {
     pub value: ConstantValue,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VarInfo {
     pub name: String,
     pub start_pc: usize,
@@ -325,13 +325,13 @@ pub struct VarInfo {
     pub reg: u8,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DebugInfo {
     pub var_info: Vec<VarInfo>,
     pub upvalue_info: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Proto {
     pub max_stack_size: u8,
     pub num_params: u8,
@@ -349,7 +349,7 @@ pub struct Proto {
 
 // DESERIALIZATION
 
-fn read_proto_source(reader: &mut Reader, string_table: &[String]) -> String {
+pub fn read_proto_source(reader: &mut Reader, string_table: &[String]) -> String {
     let proto_source_id = reader.next_var_int();
     if proto_source_id > 0 && proto_source_id - 1 < string_table.len() {
         string_table[proto_source_id - 1].clone()
@@ -358,7 +358,7 @@ fn read_proto_source(reader: &mut Reader, string_table: &[String]) -> String {
     }
 }
 
-fn read_constant(reader: &mut Reader, string_table: &[String]) -> Constant {
+pub fn read_constant(reader: &mut Reader, string_table: &[String]) -> Constant {
     let const_type = reader.next_byte();
     let value = match const_type {
         LBC_CONSTANT_NIL => ConstantValue::Nil,
@@ -391,7 +391,7 @@ fn read_constant(reader: &mut Reader, string_table: &[String]) -> Constant {
     Constant { value }
 }
 
-fn read_proto_data(reader: &mut Reader, string_table: &[String]) -> Proto {
+pub fn read_proto_data(reader: &mut Reader, string_table: &[String]) -> Proto {
     let max_stack_size = reader.next_byte();
     let num_params = reader.next_byte();
     let num_upvalues = reader.next_byte();
@@ -470,7 +470,7 @@ fn read_proto_data(reader: &mut Reader, string_table: &[String]) -> Proto {
     }
 }
 
-fn deserialize(bytecode: &[u8]) -> (Proto, Vec<Proto>, Vec<String>, u8, u8) {
+pub fn deserialize(bytecode: &[u8]) -> (Proto, Vec<Proto>, Vec<String>, u8, u8) {
     let mut reader = Reader::new(bytecode);
     let version = reader.next_byte();
     match version {
@@ -480,7 +480,7 @@ fn deserialize(bytecode: &[u8]) -> (Proto, Vec<Proto>, Vec<String>, u8, u8) {
     }
 }
 
-fn deserialize_v5(reader: &mut Reader) -> (Proto, Vec<Proto>, Vec<String>, u8, u8) {
+pub fn deserialize_v5(reader: &mut Reader) -> (Proto, Vec<Proto>, Vec<String>, u8, u8) {
     let types_version = reader.next_byte();
     if types_version < 1 || types_version > 3 {
         panic!("Invalid types version: {}", types_version);
@@ -509,7 +509,7 @@ fn deserialize_v5(reader: &mut Reader) -> (Proto, Vec<Proto>, Vec<String>, u8, u
     (main_proto, proto_table, string_table, 5, types_version)
 }
 
-fn deserialize_v6(reader: &mut Reader) -> (Proto, Vec<Proto>, Vec<String>, u8, u8) {
+pub fn deserialize_v6(reader: &mut Reader) -> (Proto, Vec<Proto>, Vec<String>, u8, u8) {
     let types_version = reader.next_byte();
     if types_version < 1 || types_version > 3 {
         panic!("Invalid types version: {}", types_version);
@@ -540,11 +540,11 @@ fn deserialize_v6(reader: &mut Reader) -> (Proto, Vec<Proto>, Vec<String>, u8, u
 
 // DISASSEMBLY & DECOMPILATION HELPERS
 
-fn fmt_bool(b: bool) -> &'static str {
+pub fn fmt_bool(b: bool) -> &'static str {
     if b { "true" } else { "false" }
 }
 
-fn format_constant(k: &Constant) -> String {
+pub fn format_constant(k: &Constant) -> String {
     match &k.value {
         ConstantValue::Nil => "nil".to_string(),
         ConstantValue::Boolean(b) => fmt_bool(*b).to_string(),
@@ -557,16 +557,17 @@ fn format_constant(k: &Constant) -> String {
     }
 }
 
-fn decompose_import_id(ids: i32) -> Vec<i32> {
-    let count = ids >> 30;
+pub fn decompose_import_id(ids: i32) -> Vec<i32> {
+    let u = ids as u32;
+    let count = u >> 30;
     let mut res = vec![];
-    if count > 0 { res.push((ids >> 20) & 1023); }
-    if count > 1 { res.push((ids >> 10) & 1023); }
-    if count > 2 { res.push(ids & 1023); }
+    if count > 0 { res.push(((u >> 20) & 1023) as i32); }
+    if count > 1 { res.push(((u >> 10) & 1023) as i32); }
+    if count > 2 { res.push((u & 1023) as i32); }
     res
 }
 
-fn import_id_to_name(proto: &Proto, ids: i32) -> String {
+pub fn import_id_to_name(proto: &Proto, ids: i32) -> String {
     if ids == 0 { return "0".to_string(); }
     let mut imported_path = String::new();
     let id_constants = decompose_import_id(ids);
@@ -581,6 +582,7 @@ fn import_id_to_name(proto: &Proto, ids: i32) -> String {
             if i > 0 { imported_path.push('.'); }
             imported_path.push_str(&name);
         } else {
+            if i > 0 { imported_path.push('.'); }
             imported_path.push_str(&format!("<const {}>", id_constant));
         }
     }
@@ -589,13 +591,12 @@ fn import_id_to_name(proto: &Proto, ids: i32) -> String {
 
 // DISASSEMBLER (read_proto)
 
-fn read_proto(proto: &Proto, depth: usize, proto_table: &[Proto], _string_table: &[String], luau_version: u8) -> String {
+pub fn read_proto(proto: &Proto, depth: usize, proto_table: &[Proto], _string_table: &[String], luau_version: u8) -> String {
     let op_table = get_op_table(luau_version);
     let mut output = String::new();
     let tab_space = "    ".repeat(depth - 1);
 
-    let params: Vec<String> = (0..proto.num_params).map(|i| format!("R{}", i)).collect();
-    let mut params = params;
+    let mut params: Vec<String> = (0..proto.num_params).map(|i| format!("R{}", i)).collect();
     if proto.is_var_arg { params.push("...".to_string()); }
 
     output.push_str(&format!("{}function({})\n", tab_space, params.join(", ")));
@@ -736,7 +737,7 @@ fn read_proto(proto: &Proto, depth: usize, proto_table: &[Proto], _string_table:
                 format!("R{}[{}..] = R{} ... top", a, aux_val, b)
             },
             "FORNPREP" | "FORNLOOP" | "FORGPREP" | "FORGPREP_INEXT" | "FORGPREP_NEXT" => format!("... goto [{}]", code_index as i64 + 1 + s_bx as i64),
-            "FORGLOOP" => format!("R{}, ..., R{} = R{}(R{}, R{}); if R{} ~= nil then R{} = R{}; goto [{}]", a+3, a+2+(aux_val & 0x7F), a, a+1, a+2, a+3, a+2, a+3, code_index as i64 + 1 + s_bx as i64),
+            "FORGLOOP" => format!("R{}, ..., R{} = R{}(R{}, R{}); if R{} ~= nil then R{} = R{}; goto [{}]", a+3, a+2+((aux_val & 0x7F) as u8), a, a+1, a+2, a+3, a+2, a+3, code_index as i64 + 1 + s_bx as i64),
             "NATIVECALL" => "Unimplemented".to_string(),
             "GETVARARGS" => if b == 0 { format!("R{}, ... = ...", a) } else { format!("R{}, ..., R{} = ...", a, a + b - 2) },
             "DUPCLOSURE" => format!("R{} = K{} -- duplicate", a, bx),
@@ -808,10 +809,10 @@ fn read_proto(proto: &Proto, depth: usize, proto_table: &[Proto], _string_table:
 
 // DECOMPILER (decompile)
 
-fn decompile(proto: &Proto, depth: usize, _string_table: &[String], luau_version: u8, proto_table: &[Proto]) -> String {
+pub fn decompile(proto: &Proto, depth: usize, _string_table: &[String], luau_version: u8, proto_table: &[Proto]) -> String {
     let op_table = get_op_table(luau_version);
     let mut output: Vec<String> = Vec::new();
-    let tab = "    ".repeat(depth + 1);
+    let tab = "    ".repeat(depth);
 
     let mut reg_names: HashMap<u8, String> = HashMap::new();
     let mut uv_names: HashMap<u8, String> = HashMap::new();
@@ -825,8 +826,8 @@ fn decompile(proto: &Proto, depth: usize, _string_table: &[String], luau_version
         }
     }
 
-    let rn = |r: u8| reg_names.get(&r).cloned().unwrap_or(format!("R{}", r));
-    let un = |u: u8| uv_names.get(&u).cloned().unwrap_or(format!("U{}", u));
+    let rn = |r: u8| reg_names.get(&r).cloned().unwrap_or_else(|| format!("R{}", r));
+    let un = |u: u8| uv_names.get(&u).cloned().unwrap_or_else(|| format!("U{}", u));
 
     // Function Signature
     let mut params: Vec<String> = Vec::new();
@@ -926,8 +927,24 @@ fn decompile(proto: &Proto, depth: usize, _string_table: &[String], luau_version
                 format!("{}{} = {}[Invalid string index]; {} = {}", tab, rn(a), rn(b), rn(a+1), rn(b))
             },
             "CALL" => {
-                let args = if b == 1 { "".to_string() } else if b == 0 { format!("{} ...", rn(a+1)) } else { format!("{}", rn(a+1)) + if b > 2 { format!(" ... {}", rn(a+b-1)).as_str() } else { "" }.to_string().as_str().to_string() };
-                let rets = if c == 1 { "".to_string() } else if c == 0 { format!("{} ...", rn(a)) } else { format!("{}", rn(a)) + if c > 2 { format!(" ... {}", rn(a+c-2)).as_str() } else { "" }.to_string().as_str().to_string() };
+                let args = if b == 1 {
+                    "".to_string()
+                } else if b == 0 {
+                    format!("{} ...", rn(a + 1))
+                } else if b == 2 {
+                    rn(a + 1)
+                } else {
+                    format!("{} ... {}", rn(a + 1), rn(a + b - 1))
+                };
+                let rets = if c == 1 {
+                    "".to_string()
+                } else if c == 0 {
+                    format!("{} ...", rn(a))
+                } else if c == 2 {
+                    rn(a)
+                } else {
+                    format!("{} ... {}", rn(a), rn(a + c - 2))
+                };
                 let call_str = format!("{}({})", rn(a), args);
                 if !rets.is_empty() { format!("{}{} = {}", tab, rets, call_str) } else { format!("{}{}", tab, call_str) }
             },
@@ -982,7 +999,11 @@ fn decompile(proto: &Proto, depth: usize, _string_table: &[String], luau_version
                 let k = if (aux_val as usize) < proto.k_table.len() { format_constant(&proto.k_table[aux_val as usize]) } else { "nil".to_string() };
                 format!("{}{} = fastcall2k({}, {}, {})", tab, rn(a), b, rn(c), k)
             },
-            "FORGLOOP" => format!("{}{} = forgloop({}, {})", tab, rn(a), rn(a), s_bx),
+            "FORGLOOP" => {
+                let max_ret = (aux_val & 0x7F) as u8;
+                format!("{}{} ... {} = {}({}, {}); if {} ~= nil then {} = {}; goto [{}]",
+                    tab, rn(a + 3), rn(a + 2 + max_ret), rn(a), rn(a + 1), rn(a + 2), rn(a + 3), rn(a + 2), rn(a + 3), code_index as i64 + 1 + s_bx as i64)
+            },
             "FORGLOOP_INEXT" => format!("{}{} = forgloop_inext({}, {})", tab, rn(a), rn(a), s_bx),
             "FORGLOOP_NEXT" => format!("{}{} = forgloop_next({}, {})", tab, rn(a), rn(a), s_bx),
             "FORGPREP" => format!("{}{} = forgprep({}, {})", tab, rn(a), rn(a), s_bx),
@@ -1068,9 +1089,9 @@ fn decompile(proto: &Proto, depth: usize, _string_table: &[String], luau_version
     output.join("\n")
 }
 
-// MAIN ENTRY POINT
+// MAIN DISASSEMBLE ENTRYPOINT
 
-fn disassemble(bytecode: &[u8]) -> (Vec<String>, Vec<String>, usize, i32, i32) {
+pub fn disassemble(bytecode: &[u8]) -> (Vec<String>, Vec<String>, usize, i32, i32) {
     if bytecode.is_empty() { return (vec![], vec![], 0, -1, -1); }
     if bytecode[0] == 0 {
         return (vec![String::from_utf8_lossy(&bytecode[1..]).to_string()], vec![], 0, -1, -1);
@@ -1102,45 +1123,4 @@ fn disassemble(bytecode: &[u8]) -> (Vec<String>, Vec<String>, usize, i32, i32) {
     }
 
     (output, decompiled_output, protos, luau_version as i32, types_version as i32)
-}
-
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        println!("Usage: {} <bytecode_file>", args[0]);
-        std::process::exit(1);
-    }
-
-    let mut file = File::open(&args[1]).expect("Failed to open file");
-    let mut bytecode = Vec::new();
-    file.read_to_end(&mut bytecode).expect("Failed to read file");
-
-    let start = Instant::now();
-    let (disassembled, decompiled, protos, luau_version, types_version) = disassemble(&bytecode);
-    let duration = start.elapsed();
-
-    let disassembled_extra = "--<@ Disassembled with Koralys' BETA disassembler @>--\n".to_string();
-    let versions = if luau_version != -1 {
-        format!("Luau version {}, types version {}", luau_version, types_version)
-    } else if types_version != -1 {
-        format!("Luau version unknown, types version {}", types_version)
-    } else {
-        "Types version unknown, luau version unknown".to_string()
-    };
-
-    let mut full_output = disassembled_extra;
-    full_output.push_str(&format!("--<@ Protos: {} | {} @>--\n", protos, versions));
-    full_output.push_str(&format!("--<@ Time taken: {:.6}s @>--\n", duration.as_secs_f64()));
-    full_output.push_str(&disassembled.join("\n"));
-
-    let mut out_file = File::create("output.txt").expect("Failed to create output.txt");
-    out_file.write_all(full_output.as_bytes()).expect("Failed to write output.txt");
-
-    println!("Disassembled bytecode in {:.6}s", duration.as_secs_f64());
-
-    let decompiled_str = decompiled.join("\n");
-    let mut decomp_file = File::create("decompiled.luau").expect("Failed to create decompiled.luau");
-    decomp_file.write_all(decompiled_str.as_bytes()).expect("Failed to write decompiled.luau");
-
-    println!("Decompiled disassembly");
 }
